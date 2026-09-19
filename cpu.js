@@ -1,6 +1,10 @@
 class Intel8080 {
     constructor() {
         this.memory = new Uint8Array(65536);
+
+        //Inicializar el FPU
+        this.fpu = new FloatingPointCoprocessor();
+
         this.reset();
     }
 
@@ -26,6 +30,11 @@ class Intel8080 {
         this.halted = false;
         if (this.memory) {
             this.memory.fill(0);
+        }
+
+        //reinicio del fpu
+        if (this.fpu){
+            this.fpu.reset();
         }
     }
 
@@ -104,6 +113,29 @@ class Intel8080 {
         this.memory[addr & 0xFFFF] = val & 0xFF;
     }
 
+    readFloat32(addr) {
+            addr &= 0xFFFF;
+            const buffer = new ArrayBuffer(4);
+            const view = new DataView(buffer);
+            view.setUint8(0, this.readMemory(addr));
+            view.setUint8(1, this.readMemory(addr + 1));
+            view.setUint8(2, this.readMemory(addr + 2));
+            view.setUint8(3, this.readMemory(addr + 3));
+            return view.getFloat32(0, true);
+    }
+
+    writeFloat32(addr, value) {
+        addr &= 0xFFFF;
+        const buffer = new ArrayBuffer(4);
+        const view = new DataView(buffer);
+        view.setFloat32(0, value, true);
+        this.writeMemory(addr,     view.getUint8(0));
+        this.writeMemory(addr + 1, view.getUint8(1));
+        this.writeMemory(addr + 2, view.getUint8(2));
+        this.writeMemory(addr + 3, view.getUint8(3));
+    }
+
+
     fetch() {
         const byte = this.readMemory(this.registers.pc);
         this.registers.pc = (this.registers.pc + 1) & 0xFFFF;
@@ -138,6 +170,86 @@ class Intel8080 {
     }
 
     execute(opcode) {
+
+    // Instrucciones del coprocesador FPU
+
+    if (opcode === 0xCB) {
+
+        const fpuOpcode = this.fetch();
+
+        switch (fpuOpcode) {
+
+            // FCLR
+            case 0x00:
+                this.fpuClear();
+                break;
+
+            // FLD FP0, address
+            case 0x10: {
+                const address = this.fetch16();
+                const value = this.readFloat32(address);
+                //Pruebas de Funcionamiento en consola
+                //console.log("Direccion:", address.toString(16));
+                //console.log("Valor:", value);
+                //console.log("FP0 antes:", this.fpu.getFP0());
+
+                this.fpuLoad(0, value);
+                
+                //console.log("FP0 después:", this.fpu.getFP0());
+
+                break;
+            }
+
+            // FLD FP1, address
+            case 0x11: {
+                const address = this.fetch16();
+                const value = this.readFloat32(address);
+
+                this.fpuLoad(1, value);
+                break;
+            }
+
+            // FST address
+            case 0x12: {
+                const address = this.fetch16();
+
+                this.writeFloat32(
+                    address,
+                    this.fpu.getFP0()
+                );
+
+                break;
+            }
+
+            // FADD
+            case 0x20:
+                this.fpuAdd();
+                break;
+
+            // FSUB
+            case 0x21:
+                this.fpuSubtract();
+                break;
+
+            // FMUL
+            case 0x22:
+                this.fpuMultiply();
+                break;
+
+            // FDIV
+            case 0x23:
+                this.fpuDivide();
+                break;
+
+            default:
+                throw new Error(
+                    `Unknown FPU opcode: CB ${fpuOpcode.toString(16).toUpperCase().padStart(2, '0')}`
+                );
+        }
+
+        return;
+    }
+
         // MOV
         if (opcode >= 0x40 && opcode <= 0x7F && opcode !== 0x76) {
             this.setRegByCode((opcode >> 3) & 0x07, this.getRegByCode(opcode & 0x07));
@@ -398,7 +510,38 @@ class Intel8080 {
             case 7: this.registers.a = val; break;
         }
     }
+
+    // Interfaz con el coprocesador FPU
+
+    fpuLoad(register, value) {
+        this.fpu.load(register, value);
+    }
+
+    fpuAdd() {
+        return this.fpu.add();
+    }
+
+    fpuSubtract() {
+        return this.fpu.subtract();
+    }
+
+    fpuMultiply() {
+        return this.fpu.multiply();
+    }
+
+    fpuDivide() {
+        return this.fpu.divide();
+    }
+
+    fpuClear() {
+        this.fpu.clear();
+    }
+
+    getFPUStatus() {
+        return this.fpu.getStatusByte();
+    }
 }
+
 
 if (typeof module !== 'undefined') {
     module.exports = Intel8080;

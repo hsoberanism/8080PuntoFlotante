@@ -3,6 +3,31 @@ const assembler = new Assembler8080();
 
 let runInterval = null;
 let memoryStart = 0;
+let resultadoAddress = null;
+let resultadoInicial = null;
+let ultimoResultado = null;
+
+function checkResultado() {
+
+    if (resultadoAddress === null) {
+        return;
+    }
+
+    const valorActual = cpu.readFloat32(resultadoAddress);
+
+    if (ultimoResultado !== null && valorActual !== ultimoResultado) {
+
+        const output = document.getElementById('assembler-output');
+
+        output.textContent =
+            `Resultado Inicial: ${resultadoInicial}\n` +
+            `Resultado Final: ${valorActual}`;
+
+        output.className = 'success';
+    }
+
+    ultimoResultado = valorActual;
+}
 
 function updateUI() {
     // Registers
@@ -108,7 +133,23 @@ document.getElementById('btn-assemble').addEventListener('click', () => {
     try {
         const result = assembler.assemble(source);
         cpu.memory.set(result.binary);
-        output.textContent = 'Assembly successful! Loaded into memory.';
+        // Buscar etiqueta RESULTADO
+        resultadoAddress = null;
+        resultadoInicial = null;
+        ultimoResultado = null;
+        if (result.labels.RESULTADO !== undefined) {
+            resultadoAddress = result.labels.RESULTADO;
+            resultadoInicial =
+            cpu.readFloat32(resultadoAddress);
+            ultimoResultado =
+            resultadoInicial;
+            output.textContent =
+            `Assembly successful! Loaded into memory.\n` +
+            `Resultado Inicial: ${resultadoInicial}`;
+        } else {
+            output.textContent =
+            'Assembly successful! Loaded into memory.';
+        }
         output.className = 'success';
         updateUI();
     } catch (e) {
@@ -128,6 +169,7 @@ document.getElementById('btn-clear-code').addEventListener('click', () => {
 
 document.getElementById('btn-step').addEventListener('click', () => {
     cpu.step();
+    checkResultado();
     updateUI();
 });
 
@@ -142,6 +184,7 @@ document.getElementById('btn-run').addEventListener('click', () => {
         }
         for (let i = 0; i < 100; i++) { // Execute in bursts
             cpu.step();
+            checkResultado();
             if (cpu.halted) break;
         }
         updateUI();

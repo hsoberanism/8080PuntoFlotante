@@ -78,6 +78,18 @@ class Assembler8080 {
             'EI': { code: 0xFB, bytes: 1 },
             'CM': { code: 0xFC, bytes: 3 },
             'CPI': { code: 0xFE, bytes: 2 },
+
+            //Instrucciones para el fpu
+            'FCLR': { code: 0xCB, bytes: 2 },
+            'FADD': { code: 0xCB, bytes: 2 },
+            'FSUB': { code: 0xCB, bytes: 2 },
+            'FMUL': { code: 0xCB, bytes: 2 },
+            'FDIV': { code: 0xCB, bytes: 2 },         
+            'FLD': { code: 0xCB, bytes: 4 },
+            'FST': { code: 0xCB, bytes: 4 },
+
+            'FLOAT': { code: null, bytes: 4 },
+
             'RST': { bytes: 1 },
         };
         this.regs = { 'B': 0, 'C': 1, 'D': 2, 'E': 3, 'H': 4, 'L': 5, 'M': 6, 'A': 7 };
@@ -138,20 +150,24 @@ class Assembler8080 {
             } else {
                 const code = this.generateOpcode(line, labels);
                 binary[pc++] = code.byte1;
-                if (line.info.bytes > 1) binary[pc++] = code.byte2;
-                if (line.info.bytes > 2) binary[pc++] = code.byte3;
-            }
+                if (line.info.bytes > 1)
+                        binary[pc++] = code.byte2;
+                    if (line.info.bytes > 2)
+                        binary[pc++] = code.byte3;
+                    if (line.info.bytes > 3)
+                        binary[pc++] = code.byte4;
+                    }
             if (pc > maxAddr) maxAddr = pc;
         });
 
-        return { binary, maxAddr };
+        return { binary, maxAddr, labels };
     }
 
     generateOpcode(line, labels) {
         const mnemonic = line.mnemonic;
         const tokens = line.tokens;
         let byte1 = line.info.code;
-        let byte2 = 0, byte3 = 0;
+        let byte2 = 0, byte3 = 0, byte4 =0;
 
         const r1 = tokens[1] ? tokens[1].toUpperCase() : null;
         const r2 = tokens[2] ? tokens[2].toUpperCase() : null;
@@ -202,7 +218,52 @@ class Assembler8080 {
         } else if (mnemonic === 'LDAX') {
             if (this.rps[r1] === undefined) throw new Error(`Invalid register pair: ${r1} in LDAX instruction`);
             byte1 = 0x0A | (this.rps[r1] << 4);
-        } else if (mnemonic === 'RST') {
+        } if (mnemonic === 'FLOAT') {
+            const value = parseFloat(tokens[1]);
+            if (Number.isNaN(value)) {
+                throw new Error(
+                    `Invalid floating-point value: ${tokens[1]}`
+                );
+            }
+            const bytes = this.float32ToBytes(value);
+            byte1 = bytes[0];
+            byte2 = bytes[1];
+            byte3 = bytes[2];
+            byte4 = bytes[3];
+        }else if (mnemonic === 'FCLR'){
+             byte1 = 0xCB;
+            byte2 = 0x00;
+        }else if (mnemonic === 'FADD') {
+            byte1 = 0xCB;
+            byte2 = 0x20;
+        }else if (mnemonic === 'FSUB') {
+            byte1 = 0xCB;
+            byte2 = 0x21;
+        }else if (mnemonic === 'FMUL') {
+            byte1 = 0xCB;
+            byte2 = 0x22;
+        }else if (mnemonic === 'FDIV') {
+            byte1 = 0xCB;
+            byte2 = 0x23;
+        }else if (mnemonic === 'FLD') {
+            const fpRegister = r1;
+            if (fpRegister !== 'FP0' && fpRegister !== 'FP1') {
+                throw new Error(`Invalid floating-point register: ${fpRegister}`);
+            }
+            byte1 = 0xCB;
+            // FP0 = 10H
+            // FP1 = 11H
+            byte2 = fpRegister === 'FP0' ? 0x10 : 0x11;
+            const address = this.parseValue(tokens[2], labels);
+            byte3 = address & 0xFF;
+            byte4 = (address >> 8) & 0xFF;
+        }else if (mnemonic === 'FST') {
+            byte1 = 0xCB;
+            byte2 = 0x12;
+            const address = this.parseValue(tokens[1], labels);
+            byte3 = address & 0xFF;
+            byte4 = (address >> 8) & 0xFF;
+        }else if (mnemonic === 'RST') {
             const val = this.parseValue(tokens[1], labels);
             if (isNaN(val) || val < 0 || val > 7) {
                 throw new Error(`Invalid RST number: ${tokens[1]}. Must be 0-7.`);
@@ -215,8 +276,22 @@ class Assembler8080 {
         } else if (line.info.bytes === 2) { // ADI, OUT, etc.
             byte2 = this.parseValue(tokens[1], labels) & 0xFF;
         }
+        
 
-        return { byte1, byte2, byte3 };
+        return { byte1, byte2, byte3, byte4 };
+    }
+
+    float32ToBytes(value) {
+        const buffer = new ArrayBuffer(4);
+        const view = new DataView(buffer);
+        // Conversion a IEEE-754 Float32, little-endian
+        view.setFloat32(0, value, true);
+        return [
+            view.getUint8(0),
+            view.getUint8(1),
+            view.getUint8(2),
+            view.getUint8(3)
+        ];
     }
 
     parseValue(val, labels = {}) {
